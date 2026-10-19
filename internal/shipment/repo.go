@@ -16,6 +16,7 @@ var ErrNotFound = errors.New("not found")
 type Repo interface {
 	CreateBatch(ctx context.Context, b *Batch, items []NewShipmentInput) ([]Shipment, error)
 	FindBatchByKey(ctx context.Context, key string) (*Batch, error)
+	GetBatch(ctx context.Context, key string) (*Batch, error)
 	GetShipment(ctx context.Context, id string) (*Shipment, error)
 	ListByBatch(ctx context.Context, batchID string) ([]Shipment, error)
 	ListPendingIDs(ctx context.Context) ([]string, error)
@@ -108,6 +109,21 @@ func (r *PGRepo) FindBatchByKey(ctx context.Context, key string) (*Batch, error)
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, source, customer_id, idempotency_key, item_count, created_at
 		FROM goapi.batches WHERE idempotency_key = $1`, key,
+	).Scan(&b.ID, &b.Source, &b.CustomerID, &b.IdempotencyKey, &b.ItemCount, &b.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find batch: %w", err)
+	}
+	return &b, nil
+}
+
+func (r *PGRepo) GetBatch(ctx context.Context, key string) (*Batch, error) {
+	var b Batch
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, source, customer_id, idempotency_key, item_count, created_at
+		FROM goapi.batches WHERE id = $1`, key,
 	).Scan(&b.ID, &b.Source, &b.CustomerID, &b.IdempotencyKey, &b.ItemCount, &b.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

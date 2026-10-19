@@ -17,6 +17,7 @@ import (
 type ShipmentService interface {
 	Ingest(ctx context.Context, customerID, idemKey string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error)
 	Get(ctx context.Context, id string) (*shipment.Shipment, error)
+	GetBatch(ctx context.Context, id string) (*shipment.IngestResult, error)
 }
 
 type Pinger interface {
@@ -37,6 +38,7 @@ func New(svc ShipmentService, db Pinger, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /shipments", s.handleIngest)
 	mux.HandleFunc("GET /shipments/{id}", s.handleGetShipment)
+	mux.HandleFunc("GET /batches/{id}", s.handleGetBatch)
 
 	return s.logging(mux)
 }
@@ -81,6 +83,15 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetShipment(w http.ResponseWriter, r *http.Request) {
+	sh, err := s.svc.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sh)
+}
+
+func (s *Server) handleGetBatch(w http.ResponseWriter, r *http.Request) {
 	sh, err := s.svc.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeServiceError(w, err)

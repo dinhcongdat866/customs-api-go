@@ -1,3 +1,5 @@
 .env
 bin/
 *.log
+body.json
+*.exe

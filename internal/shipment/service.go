@@ -90,6 +90,18 @@ func (s *Service) Get(ctx context.Context, id string) (*Shipment, error) {
 	return s.repo.GetShipment(ctx, id)
 }
 
+func (s *Service) GetBatch(ctx context.Context, id string) (*IngestResult, error) {
+	b, err := s.repo.GetBatch(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	shipments, err := s.repo.ListByBatch(ctx, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &IngestResult{Batch: *b, Shipments: shipments, Replayed: true}, nil
+}
+
 func validate(customerID string, items []NewShipmentInput) error {
 	if customerID == "" {
 		return &ValidationError{"customerId is required"}

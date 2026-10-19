@@ -1,0 +1,39 @@
+### Open with the VS Code "REST Client" extension and click "Send Request" above each block.
+@base = http://localhost:8080
+
+### Health (pings the database)
+GET {{base}}/health
+
+### Ingest a batch (first call → 201)
+# @name ingest
+POST {{base}}/shipments
+Content-Type: application/json
+Idempotency-Key: demo-3
+
+{
+  "customerId": "acme",
+  "items": [
+    { "rawTitle": "Cotton t-shirt XL", "declaredValue": 12.50, "currency": "USD", "originCountry": "VN", "destinationCountry": "US" },
+    { "rawTitle": "Kids jumpsuit", "declaredValue": 30, "destinationCountry": "US" },
+    { "rawTitle": "Cat hoodie soft warm", "declaredValue": "19.99", "destinationCountry": "JP" }
+  ]
+}
+
+### Same key again → 200 with "replayed": true, no duplicate batch
+POST {{base}}/shipments
+Content-Type: application/json
+Idempotency-Key: demo-3
+
+{ "customerId": "acme", "items": [ { "rawTitle": "ignored, batch already exists" } ] }
+
+### Read a shipment (uses the first id from the ingest response above; wait ~2s for classification)
+GET {{base}}/shipments/{{ingest.response.body.shipments[0].id}}
+
+### Validation error → 400
+POST {{base}}/shipments
+Content-Type: application/json
+
+{ "customerId": "acme", "items": [ { "rawTitle": "x", "declaredValue": -5 } ] }
+
+### Unknown id → 404
+GET {{base}}/shipments/00000000-0000-0000-0000-000000000000

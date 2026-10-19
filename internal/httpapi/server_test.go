@@ -14,14 +14,18 @@ import (
 
 // fakeService satisfies ShipmentService without a database.
 type fakeService struct {
-	ingest func(customerID, key string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error)
-	get    func(id string) (*shipment.Shipment, error)
+	ingest   func(customerID, key string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error)
+	get      func(id string) (*shipment.Shipment, error)
+	getBatch func(id string) (*shipment.IngestResult, error)
 }
 
 func (f *fakeService) Ingest(_ context.Context, c, k string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error) {
 	return f.ingest(c, k, items)
 }
 func (f *fakeService) Get(_ context.Context, id string) (*shipment.Shipment, error) { return f.get(id) }
+func (f *fakeService) GetBatch(_ context.Context, id string) (*shipment.IngestResult, error) {
+	return f.getBatch(id)
+}
 
 type okPinger struct{}
 
