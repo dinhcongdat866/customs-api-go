@@ -18,6 +18,7 @@ type fakeService struct {
 	get      func(id string) (*shipment.Shipment, error)
 	getBatch func(id string) (*shipment.IngestResult, error)
 	reviews  func(customerID, cursor string, limit int) (*shipment.ReviewPage, error)
+	decide   func(id string, d shipment.ReviewDecision) (*shipment.Shipment, error)
 }
 
 func (f *fakeService) Ingest(_ context.Context, c, k string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error) {
@@ -29,6 +30,9 @@ func (f *fakeService) GetBatch(_ context.Context, id string) (*shipment.IngestRe
 }
 func (f *fakeService) ListReviews(_ context.Context, c, cur string, limit int) (*shipment.ReviewPage, error) {
 	return f.reviews(c, cur, limit)
+}
+func (f *fakeService) Decide(_ context.Context, id string, d shipment.ReviewDecision) (*shipment.Shipment, error) {
+	return f.decide(id, d)
 }
 
 type okPinger struct{}
@@ -158,5 +162,36 @@ func TestListReviews_BadLimitIs400(t *testing.T) {
 	newTestServer(&fakeService{}).ServeHTTP(rec, httptest.NewRequest("GET", "/reviews?limit=zero", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestDecision_PassesBodyAndID(t *testing.T) {
+	var gotID string
+	var gotD shipment.ReviewDecision
+	svc := &fakeService{decide: func(id string, d shipment.ReviewDecision) (*shipment.Shipment, error) {
+		gotID, gotD = id, d
+		return &shipment.Shipment{ID: id, Status: shipment.StatusCleared}, nil
+	}}
+	body := `{"decision":"override","hsCode":"6110","reviewer":"dat","note":"sweater"}`
+	rec := httptest.NewRecorder()
+	newTestServer(svc).ServeHTTP(rec, httptest.NewRequest("POST", "/reviews/s1/decision", strings.NewReader(body)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	if gotID != "s1" || gotD.Decision != shipment.DecisionOverride || gotD.HSCode != "6110" || gotD.Reviewer != "dat" {
+		t.Fatalf("got id=%q d=%+v", gotID, gotD)
+	}
+}
+
+func TestDecision_ConflictIs409(t *testing.T) {
+	svc := &fakeService{decide: func(string, shipment.ReviewDecision) (*shipment.Shipment, error) {
+		return nil, shipment.ErrConflict
+	}}
+	rec := httptest.NewRecorder()
+	newTestServer(svc).ServeHTTP(rec, httptest.NewRequest("POST", "/reviews/s1/decision",
+		strings.NewReader(`{"decision":"approve","reviewer":"dat"}`)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
 	}
 }

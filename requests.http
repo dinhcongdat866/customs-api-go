@@ -44,3 +44,15 @@ GET {{base}}/reviews?customerId=acme&limit=2
 
 ### Next page: uses nextCursor from the response above
 GET {{base}}/reviews?customerId=acme&limit=2&cursor={{reviews.response.body.nextCursor}}
+
+### Reviewer approves the model's code (uses first item of the queue above)
+POST {{base}}/reviews/{{reviews.response.body.items[0].id}}/decision
+Content-Type: application/json
+
+{ "decision": "approve", "reviewer": "dat" }
+
+### Same shipment again -> 409, it is already cleared
+POST {{base}}/reviews/{{reviews.response.body.items[0].id}}/decision
+Content-Type: application/json
+
+{ "decision": "override", "hsCode": "6110", "reviewer": "dat", "note": "too late" }

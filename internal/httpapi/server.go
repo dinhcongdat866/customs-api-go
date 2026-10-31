@@ -20,6 +20,7 @@ type ShipmentService interface {
 	Get(ctx context.Context, id string) (*shipment.Shipment, error)
 	GetBatch(ctx context.Context, id string) (*shipment.IngestResult, error)
 	ListReviews(ctx context.Context, customerID, cursor string, limit int) (*shipment.ReviewPage, error)
+	Decide(ctx context.Context, id string, d shipment.ReviewDecision) (*shipment.Shipment, error)
 }
 
 type Pinger interface {
@@ -42,6 +43,7 @@ func New(svc ShipmentService, db Pinger, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /shipments/{id}", s.handleGetShipment)
 	mux.HandleFunc("GET /batches/{id}", s.handleGetBatch)
 	mux.HandleFunc("GET /reviews", s.handleListReviews)
+	mux.HandleFunc("POST /reviews/{id}/decision", s.handleDecision)
 
 	return s.logging(mux)
 }
@@ -123,6 +125,22 @@ func (s *Server) handleListReviews(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, page)
 }
 
+// POST /reviews/{id}/decision  {"decision":"approve"|"override","hsCode":"6110","reviewer":"dat"}
+func (s *Server) handleDecision(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var d shipment.ReviewDecision
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	sh, err := s.svc.Decide(r.Context(), r.PathValue("id"), d)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sh)
+}
+
 // writeServiceError maps domain errors to HTTP codes. Anything unknown is a
 // 500 with the detail logged, never sent to the client.
 func (s *Server) writeServiceError(w http.ResponseWriter, err error) {
@@ -132,6 +150,8 @@ func (s *Server) writeServiceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, ve.Msg)
 	case errors.Is(err, shipment.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, shipment.ErrConflict):
+		writeError(w, http.StatusConflict, "shipment is no longer awaiting review")
 	default:
 		s.log.Error("request failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

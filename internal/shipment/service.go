@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"regexp"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -126,6 +127,41 @@ func (s *Service) ListReviews(ctx context.Context, customerID, cursor string, li
 		page.Items = []Shipment{} // "items": [] rather than null
 	}
 	return page, nil
+}
+
+var hsCodeRe = regexp.MustCompile(`^[0-9]{4,10}$`)
+
+// Decide applies a reviewer's decision. The repo enforces "still
+// needs_review"; this layer only validates input and picks the final code.
+func (s *Service) Decide(ctx context.Context, id string, d ReviewDecision) (*Shipment, error) {
+	if d.Reviewer == "" {
+		return nil, &ValidationError{"reviewer is required"}
+	}
+	switch d.Decision {
+	case DecisionApprove:
+		if d.HSCode != "" {
+			return nil, &ValidationError{"approve does not take hsCode; use override"}
+		}
+	case DecisionOverride:
+		if !hsCodeRe.MatchString(d.HSCode) {
+			return nil, &ValidationError{"override requires hsCode of 4-10 digits"}
+		}
+	default:
+		return nil, &ValidationError{`decision must be "approve" or "override"`}
+	}
+
+	finalCode := d.HSCode
+	if d.Decision == DecisionApprove {
+		sh, err := s.repo.GetShipment(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if sh.HSCode == nil {
+			return nil, &ValidationError{"shipment has no proposed hsCode to approve; use override"}
+		}
+		finalCode = *sh.HSCode
+	}
+	return s.repo.ApplyDecision(ctx, id, d, finalCode)
 }
 
 func (s *Service) Get(ctx context.Context, id string) (*Shipment, error) {

@@ -9,7 +9,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	// ErrConflict: the row exists but is no longer in the state the caller
+	// assumed (someone else got there first).
+	ErrConflict = errors.New("conflict")
+)
 
 // Repo is everything the service needs from storage. Handlers and tests
 // talk to this interface, never to pgx directly.
@@ -21,6 +26,7 @@ type Repo interface {
 	ListByBatch(ctx context.Context, batchID string) ([]Shipment, error)
 	ListPendingIDs(ctx context.Context) ([]string, error)
 	ListReviewQueue(ctx context.Context, q ReviewQuery) ([]Shipment, error)
+	ApplyDecision(ctx context.Context, id string, d ReviewDecision, finalHSCode string) (*Shipment, error)
 	SetStatus(ctx context.Context, id string, s Status) error
 	SaveClassification(ctx context.Context, c Classification, newStatus Status) error
 }
@@ -197,10 +203,10 @@ func (r *PGRepo) ListReviewQueue(ctx context.Context, q ReviewQuery) ([]Shipment
 	where := ` WHERE s.status = $1`
 
 	if q.CustomerID != "" {
-		// customer_id lives on the batch, not the shipment
-		sql += ` JOIN goapi.batches b ON b.id = s.batch_id`
+		// customer_id lives on the batch, not the shipment. A sub-select
+		// instead of a JOIN keeps the shared column list unambiguous.
 		args = append(args, q.CustomerID)
-		where += fmt.Sprintf(` AND b.customer_id = $%d`, len(args))
+		where += fmt.Sprintf(` AND s.batch_id IN (SELECT id FROM goapi.batches WHERE customer_id = $%d)`, len(args))
 	}
 	if q.After != nil {
 		// Row comparison: "later than the cursor" in the same order as ORDER BY.
@@ -225,6 +231,58 @@ func (r *PGRepo) ListReviewQueue(ctx context.Context, q ReviewQuery) ([]Shipment
 		out = append(out, *s)
 	}
 	return out, rows.Err()
+}
+
+// ApplyDecision moves a needs_review shipment to cleared and writes the audit
+// row, atomically. The WHERE status = 'needs_review' is the concurrency
+// guard: if two reviewers decide the same shipment at once, exactly one
+// UPDATE matches; the other sees 0 rows and gets ErrConflict. No SELECT FOR
+// UPDATE needed because the state check and the write are one statement.
+func (r *PGRepo) ApplyDecision(ctx context.Context, id string, d ReviewDecision, finalHSCode string) (*Shipment, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var before *string
+	err = tx.QueryRow(ctx,
+		`SELECT hs_code FROM goapi.shipments WHERE id = $1`, id).Scan(&before)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load before: %w", err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		UPDATE goapi.shipments
+		SET status = $2, hs_code = $3, updated_at = now()
+		WHERE id = $1 AND status = $4
+		RETURNING `+shipmentCols,
+		id, string(StatusCleared), finalHSCode, string(StatusNeedsReview))
+	sh, err := scanShipment(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrConflict // exists, but not needs_review any more
+	}
+	if err != nil {
+		return nil, fmt.Errorf("apply decision: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO goapi.audit_log (shipment_id, actor, action, detail)
+		VALUES ($1, $2, $3, $4)`,
+		id, "user:"+d.Reviewer, "review_"+string(d.Decision), map[string]any{
+			"hsCodeBefore": before, "hsCodeAfter": finalHSCode, "note": d.Note,
+		})
+	if err != nil {
+		return nil, fmt.Errorf("insert audit: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+	return sh, nil
 }
 
 func (r *PGRepo) SetStatus(ctx context.Context, id string, s Status) error {

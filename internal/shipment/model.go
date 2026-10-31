@@ -83,6 +83,21 @@ type Classification struct {
 	LatencyMs     int
 }
 
+// Decision is what a human reviewer says about a needs_review shipment.
+type Decision string
+
+const (
+	DecisionApprove  Decision = "approve"  // keep the model's hs_code
+	DecisionOverride Decision = "override" // replace it with HSCode
+)
+
+type ReviewDecision struct {
+	Decision Decision `json:"decision"`
+	HSCode   string   `json:"hsCode,omitempty"` // required for override
+	Reviewer string   `json:"reviewer"`
+	Note     string   `json:"note,omitempty"`
+}
+
 // ReviewQuery is one page request on the review queue.
 type ReviewQuery struct {
 	CustomerID string  // optional filter
