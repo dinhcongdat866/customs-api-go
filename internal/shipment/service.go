@@ -99,7 +99,7 @@ func (s *Service) GetBatch(ctx context.Context, id string) (*IngestResult, error
 	if err != nil {
 		return nil, err
 	}
-	return &IngestResult{Batch: *b, Shipments: shipments, Replayed: true}, nil
+	return &IngestResult{Batch: *b, Shipments: shipments}, nil
 }
 
 func validate(customerID string, items []NewShipmentInput) error {

@@ -92,12 +92,12 @@ func (s *Server) handleGetShipment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetBatch(w http.ResponseWriter, r *http.Request) {
-	sh, err := s.svc.Get(r.Context(), r.PathValue("id"))
+	res, err := s.svc.GetBatch(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sh)
+	writeJSON(w, http.StatusOK, res)
 }
 
 // writeServiceError maps domain errors to HTTP codes. Anything unknown is a
