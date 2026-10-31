@@ -20,6 +20,7 @@ type Repo interface {
 	GetShipment(ctx context.Context, id string) (*Shipment, error)
 	ListByBatch(ctx context.Context, batchID string) ([]Shipment, error)
 	ListPendingIDs(ctx context.Context) ([]string, error)
+	ListReviewQueue(ctx context.Context, q ReviewQuery) ([]Shipment, error)
 	SetStatus(ctx context.Context, id string, s Status) error
 	SaveClassification(ctx context.Context, c Classification, newStatus Status) error
 }
@@ -184,6 +185,46 @@ func (r *PGRepo) ListPendingIDs(ctx context.Context) ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// ListReviewQueue returns up to q.Limit shipments waiting for a human,
+// oldest first, starting after q.After (keyset pagination: no OFFSET, so
+// page 1000 costs the same as page 1 and rows never shift between pages).
+func (r *PGRepo) ListReviewQueue(ctx context.Context, q ReviewQuery) ([]Shipment, error) {
+	sql := `SELECT ` + shipmentCols + `
+		FROM goapi.shipments s`
+	args := []any{string(StatusNeedsReview)}
+	where := ` WHERE s.status = $1`
+
+	if q.CustomerID != "" {
+		// customer_id lives on the batch, not the shipment
+		sql += ` JOIN goapi.batches b ON b.id = s.batch_id`
+		args = append(args, q.CustomerID)
+		where += fmt.Sprintf(` AND b.customer_id = $%d`, len(args))
+	}
+	if q.After != nil {
+		// Row comparison: "later than the cursor" in the same order as ORDER BY.
+		args = append(args, q.After.CreatedAt, q.After.ID)
+		where += fmt.Sprintf(` AND (s.created_at, s.id) > ($%d, $%d::uuid)`, len(args)-1, len(args))
+	}
+	args = append(args, q.Limit)
+	sql += where + fmt.Sprintf(` ORDER BY s.created_at, s.id LIMIT $%d`, len(args))
+
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list review queue: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Shipment, 0, q.Limit)
+	for rows.Next() {
+		s, err := scanShipment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *s)
+	}
+	return out, rows.Err()
 }
 
 func (r *PGRepo) SetStatus(ctx context.Context, id string, s Status) error {

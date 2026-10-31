@@ -37,3 +37,10 @@ Content-Type: application/json
 
 ### Unknown id → 404
 GET {{base}}/shipments/00000000-0000-0000-0000-000000000000
+
+### Review queue, first page (oldest needs_review first)
+# @name reviews
+GET {{base}}/reviews?customerId=acme&limit=2
+
+### Next page: uses nextCursor from the response above
+GET {{base}}/reviews?customerId=acme&limit=2&cursor={{reviews.response.body.nextCursor}}

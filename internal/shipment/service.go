@@ -86,6 +86,48 @@ func (s *Service) replay(ctx context.Context, idemKey string) (*IngestResult, er
 	return &IngestResult{Batch: *b, Shipments: shipments, Replayed: true}, nil
 }
 
+const (
+	defaultPageSize = 50
+	maxPageSize     = 200
+)
+
+// ListReviews returns one page of the review queue. It asks the repo for one
+// extra row: if it comes back, there is a next page and the cursor points at
+// the last row we actually return.
+func (s *Service) ListReviews(ctx context.Context, customerID, cursor string, limit int) (*ReviewPage, error) {
+	if limit <= 0 {
+		limit = defaultPageSize
+	}
+	if limit > maxPageSize {
+		return nil, &ValidationError{fmt.Sprintf("limit must be at most %d", maxPageSize)}
+	}
+	q := ReviewQuery{CustomerID: customerID, Limit: limit + 1}
+	if cursor != "" {
+		c, err := DecodeCursor(cursor)
+		if err != nil {
+			return nil, err
+		}
+		q.After = c
+	}
+
+	items, err := s.repo.ListReviewQueue(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+
+	page := &ReviewPage{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		last := page.Items[limit-1]
+		next := Cursor{CreatedAt: last.CreatedAt, ID: last.ID}.Encode()
+		page.NextCursor = &next
+	}
+	if page.Items == nil {
+		page.Items = []Shipment{} // "items": [] rather than null
+	}
+	return page, nil
+}
+
 func (s *Service) Get(ctx context.Context, id string) (*Shipment, error) {
 	return s.repo.GetShipment(ctx, id)
 }

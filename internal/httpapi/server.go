@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/dinhcongdat866/customs-api-go/internal/shipment"
@@ -18,6 +19,7 @@ type ShipmentService interface {
 	Ingest(ctx context.Context, customerID, idemKey string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error)
 	Get(ctx context.Context, id string) (*shipment.Shipment, error)
 	GetBatch(ctx context.Context, id string) (*shipment.IngestResult, error)
+	ListReviews(ctx context.Context, customerID, cursor string, limit int) (*shipment.ReviewPage, error)
 }
 
 type Pinger interface {
@@ -39,6 +41,7 @@ func New(svc ShipmentService, db Pinger, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /shipments", s.handleIngest)
 	mux.HandleFunc("GET /shipments/{id}", s.handleGetShipment)
 	mux.HandleFunc("GET /batches/{id}", s.handleGetBatch)
+	mux.HandleFunc("GET /reviews", s.handleListReviews)
 
 	return s.logging(mux)
 }
@@ -98,6 +101,26 @@ func (s *Server) handleGetBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// GET /reviews?customerId=acme&limit=50&cursor=<opaque>
+func (s *Server) handleListReviews(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 0
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = n
+	}
+	page, err := s.svc.ListReviews(r.Context(), q.Get("customerId"), q.Get("cursor"), limit)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
 }
 
 // writeServiceError maps domain errors to HTTP codes. Anything unknown is a

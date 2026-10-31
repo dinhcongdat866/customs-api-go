@@ -83,6 +83,18 @@ type Classification struct {
 	LatencyMs     int
 }
 
+// ReviewQuery is one page request on the review queue.
+type ReviewQuery struct {
+	CustomerID string  // optional filter
+	After      *Cursor // nil = first page
+	Limit      int
+}
+
+type ReviewPage struct {
+	Items      []Shipment `json:"items"`
+	NextCursor *string    `json:"nextCursor"` // nil = no more pages
+}
+
 type IngestResult struct {
 	Batch     Batch      `json:"batch"`
 	Shipments []Shipment `json:"shipments"`

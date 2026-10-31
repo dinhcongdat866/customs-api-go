@@ -17,6 +17,7 @@ type fakeService struct {
 	ingest   func(customerID, key string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error)
 	get      func(id string) (*shipment.Shipment, error)
 	getBatch func(id string) (*shipment.IngestResult, error)
+	reviews  func(customerID, cursor string, limit int) (*shipment.ReviewPage, error)
 }
 
 func (f *fakeService) Ingest(_ context.Context, c, k string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error) {
@@ -25,6 +26,9 @@ func (f *fakeService) Ingest(_ context.Context, c, k string, items []shipment.Ne
 func (f *fakeService) Get(_ context.Context, id string) (*shipment.Shipment, error) { return f.get(id) }
 func (f *fakeService) GetBatch(_ context.Context, id string) (*shipment.IngestResult, error) {
 	return f.getBatch(id)
+}
+func (f *fakeService) ListReviews(_ context.Context, c, cur string, limit int) (*shipment.ReviewPage, error) {
+	return f.reviews(c, cur, limit)
 }
 
 type okPinger struct{}
@@ -125,5 +129,34 @@ func TestGetShipment_NotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestListReviews_PassesQueryParams(t *testing.T) {
+	var gotCustomer, gotCursor string
+	var gotLimit int
+	svc := &fakeService{reviews: func(c, cur string, limit int) (*shipment.ReviewPage, error) {
+		gotCustomer, gotCursor, gotLimit = c, cur, limit
+		return &shipment.ReviewPage{Items: []shipment.Shipment{}}, nil
+	}}
+	rec := httptest.NewRecorder()
+	newTestServer(svc).ServeHTTP(rec, httptest.NewRequest("GET", "/reviews?customerId=acme&cursor=abc&limit=20", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	if gotCustomer != "acme" || gotCursor != "abc" || gotLimit != 20 {
+		t.Fatalf("got customer=%q cursor=%q limit=%d", gotCustomer, gotCursor, gotLimit)
+	}
+	if !strings.Contains(rec.Body.String(), `"items":[]`) {
+		t.Fatalf("empty page must encode items as []: %s", rec.Body.String())
+	}
+}
+
+func TestListReviews_BadLimitIs400(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newTestServer(&fakeService{}).ServeHTTP(rec, httptest.NewRequest("GET", "/reviews?limit=zero", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }
