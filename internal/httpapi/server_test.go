@@ -19,6 +19,7 @@ type fakeService struct {
 	getBatch func(id string) (*shipment.IngestResult, error)
 	reviews  func(customerID, cursor string, limit int) (*shipment.ReviewPage, error)
 	decide   func(id string, d shipment.ReviewDecision) (*shipment.Shipment, error)
+	summary  func(id string) (*shipment.BatchSummary, error)
 }
 
 func (f *fakeService) Ingest(_ context.Context, c, k string, items []shipment.NewShipmentInput) (*shipment.IngestResult, error) {
@@ -33,6 +34,9 @@ func (f *fakeService) ListReviews(_ context.Context, c, cur string, limit int) (
 }
 func (f *fakeService) Decide(_ context.Context, id string, d shipment.ReviewDecision) (*shipment.Shipment, error) {
 	return f.decide(id, d)
+}
+func (f *fakeService) Summary(_ context.Context, id string) (*shipment.BatchSummary, error) {
+	return f.summary(id)
 }
 
 type okPinger struct{}
@@ -193,5 +197,14 @@ func TestDecision_ConflictIs409(t *testing.T) {
 		strings.NewReader(`{"decision":"approve","reviewer":"dat"}`)))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+}
+
+func TestBatchSummary_NotFound(t *testing.T) {
+	svc := &fakeService{summary: func(string) (*shipment.BatchSummary, error) { return nil, shipment.ErrNotFound }}
+	rec := httptest.NewRecorder()
+	newTestServer(svc).ServeHTTP(rec, httptest.NewRequest("GET", "/batches/nope/summary", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }

@@ -56,3 +56,6 @@ POST {{base}}/reviews/{{reviews.response.body.items[0].id}}/decision
 Content-Type: application/json
 
 { "decision": "override", "hsCode": "6110", "reviewer": "dat", "note": "too late" }
+
+### Batch progress without loading its rows (one GROUP BY)
+GET {{base}}/batches/{{ingest.response.body.batch.id}}/summary

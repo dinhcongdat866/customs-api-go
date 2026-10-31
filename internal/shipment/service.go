@@ -164,6 +164,26 @@ func (s *Service) Decide(ctx context.Context, id string, d ReviewDecision) (*Shi
 	return s.repo.ApplyDecision(ctx, id, d, finalCode)
 }
 
+// Summary reports a batch's progress: two small queries, no shipment rows.
+func (s *Service) Summary(ctx context.Context, batchID string) (*BatchSummary, error) {
+	b, err := s.repo.GetBatch(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+	found, err := s.repo.CountByStatus(ctx, b.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	sum := &BatchSummary{Batch: *b, Counts: make(map[Status]int, len(AllStatuses))}
+	for _, st := range AllStatuses {
+		sum.Counts[st] = found[st] // missing key => 0
+		sum.Total += found[st]
+	}
+	sum.Done = found[StatusReceived] == 0 && found[StatusProcessing] == 0
+	return sum, nil
+}
+
 func (s *Service) Get(ctx context.Context, id string) (*Shipment, error) {
 	return s.repo.GetShipment(ctx, id)
 }

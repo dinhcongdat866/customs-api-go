@@ -27,6 +27,7 @@ type Repo interface {
 	ListPendingIDs(ctx context.Context) ([]string, error)
 	ListReviewQueue(ctx context.Context, q ReviewQuery) ([]Shipment, error)
 	ApplyDecision(ctx context.Context, id string, d ReviewDecision, finalHSCode string) (*Shipment, error)
+	CountByStatus(ctx context.Context, batchID string) (map[Status]int, error)
 	SetStatus(ctx context.Context, id string, s Status) error
 	SaveClassification(ctx context.Context, c Classification, newStatus Status) error
 }
@@ -283,6 +284,30 @@ func (r *PGRepo) ApplyDecision(ctx context.Context, id string, d ReviewDecision,
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return sh, nil
+}
+
+// CountByStatus is one GROUP BY round trip. The tempting alternative,
+// ListByBatch and count in Go, moves every row (up to 500) over the wire to
+// produce seven integers; at scale that is the N+1 / over-fetching smell.
+func (r *PGRepo) CountByStatus(ctx context.Context, batchID string) (map[Status]int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT status, count(*) FROM goapi.shipments
+		WHERE batch_id = $1 GROUP BY status`, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("count by status: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[Status]int{}
+	for rows.Next() {
+		var st string
+		var n int
+		if err := rows.Scan(&st, &n); err != nil {
+			return nil, err
+		}
+		out[Status(st)] = n
+	}
+	return out, rows.Err()
 }
 
 func (r *PGRepo) SetStatus(ctx context.Context, id string, s Status) error {

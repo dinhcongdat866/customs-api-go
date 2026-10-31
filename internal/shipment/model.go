@@ -110,6 +110,21 @@ type ReviewPage struct {
 	NextCursor *string    `json:"nextCursor"` // nil = no more pages
 }
 
+// AllStatuses is the fixed order used when reporting counts, so clients
+// always see every key even when the count is 0.
+var AllStatuses = []Status{
+	StatusReceived, StatusProcessing, StatusNeedsReview, StatusNeedsInfo,
+	StatusCleared, StatusBlocked, StatusFailed,
+}
+
+// BatchSummary is "how far along is this batch" without loading its rows.
+type BatchSummary struct {
+	Batch  Batch          `json:"batch"`
+	Total  int            `json:"total"`
+	Counts map[Status]int `json:"counts"`
+	Done   bool           `json:"done"` // nothing left in received/processing
+}
+
 type IngestResult struct {
 	Batch     Batch      `json:"batch"`
 	Shipments []Shipment `json:"shipments"`

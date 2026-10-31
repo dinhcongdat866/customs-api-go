@@ -21,6 +21,7 @@ type ShipmentService interface {
 	GetBatch(ctx context.Context, id string) (*shipment.IngestResult, error)
 	ListReviews(ctx context.Context, customerID, cursor string, limit int) (*shipment.ReviewPage, error)
 	Decide(ctx context.Context, id string, d shipment.ReviewDecision) (*shipment.Shipment, error)
+	Summary(ctx context.Context, batchID string) (*shipment.BatchSummary, error)
 }
 
 type Pinger interface {
@@ -42,6 +43,7 @@ func New(svc ShipmentService, db Pinger, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /shipments", s.handleIngest)
 	mux.HandleFunc("GET /shipments/{id}", s.handleGetShipment)
 	mux.HandleFunc("GET /batches/{id}", s.handleGetBatch)
+	mux.HandleFunc("GET /batches/{id}/summary", s.handleBatchSummary)
 	mux.HandleFunc("GET /reviews", s.handleListReviews)
 	mux.HandleFunc("POST /reviews/{id}/decision", s.handleDecision)
 
@@ -103,6 +105,15 @@ func (s *Server) handleGetBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleBatchSummary(w http.ResponseWriter, r *http.Request) {
+	sum, err := s.svc.Summary(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sum)
 }
 
 // GET /reviews?customerId=acme&limit=50&cursor=<opaque>
